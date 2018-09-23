@@ -7,6 +7,8 @@ import vis from "vis";
 
 import mu from "./mu";
 import pq from "./pq";
+import peano from "./peano";
+import logic from "./logic";
 
 const styles = () => ({
   main: {
@@ -41,6 +43,8 @@ const Rules = withStyles(styles)(
       <Select value={system} onChange={e => setSystem(e.target.value)}>
         <MenuItem value="mu">MU</MenuItem>
         <MenuItem value="pq">PQ</MenuItem>
+        <MenuItem value="peano">Peano</MenuItem>
+        <MenuItem value="logic">Logic</MenuItem>
       </Select>
       {rules.map(({ name, transformation }, idx) => (
         <Button
@@ -65,8 +69,8 @@ const Theorems = withStyles(styles)(({ classes }) => (
 
 class App extends React.Component {
   state = {
-    selected: 0,
-    system: "pq",
+    selected: -1,
+    system: "logic",
     rules: []
   };
 
@@ -78,14 +82,20 @@ class App extends React.Component {
     console.log(system);
     this.network.destroy();
     this.makeNetwork(system);
-    this.setState({ system });
+    this.setState({ system, selected: -1 });
   };
 
   makeNetwork = system => {
-    const { axioms, rules } = { mu, pq }[system];
+    const { axioms, rules } = { mu, pq, peano, logic }[system];
     this.setState({ rules });
     // create an array with nodes
-    this.nodes = new vis.DataSet(axioms.map(label => ({ label, id: label })));
+    this.nodes = new vis.DataSet(
+      axioms
+        .map(a => a.toString())
+        .map(label => ({ label, id: label, color: "#77cc77" }))
+    );
+    this.theorems = [...axioms];
+
     // create an array with edges
     this.edges = new vis.DataSet([]);
 
@@ -96,28 +106,70 @@ class App extends React.Component {
         arrows: {
           to: { enabled: true, scaleFactor: 1, type: "arrow" }
         }
+      },
+      nodes: {
+        shape: "box",
+        margin: 16
+      },
+      physics: {
+        enabled: true,
+        barnesHut: {
+          gravitationalConstant: -5000,
+          springLength: 250,
+          springConstant: 0.1
+        }
       }
     };
     const container = document.getElementById("network");
     this.network = new vis.Network(container, data, options);
-
     this.network.on("click", this.handleNetworkClick);
   };
 
   handleNetworkClick = params => {
+    if (!this.selectedNodes) return;
     if (params.nodes.length > 0) {
-      const ruleToApply = this.state.rules[this.state.selected];
-      const newIds = ruleToApply.transformation(params.nodes[0]);
-      this.nodes.update(newIds.map(id => ({ id, label: id })));
-      const label = "Rule " + (this.state.selected + 1);
-      this.edges.update(
-        newIds.map(to => {
-          const from = params.nodes[0];
-          return { from, to, id: from + "->" + to, label };
-        })
-      );
-      this.network.selectNodes([]);
+      const selectedRule = this.state.rules[this.state.selected];
+      if (!selectedRule) return;
+      const { requiredPremises, transformation } = selectedRule;
+      if (this.selectedNodes && this.selectedNodes.length < requiredPremises) {
+        this.selectedNodes.push(
+          this.theorems.find(x => x.toString() === params.nodes[0])
+        );
+      }
+      if (this.selectedNodes.length == requiredPremises) {
+        console.log("HELLO");
+        const newTheorems = transformation(this.selectedNodes);
+        console.log(newTheorems);
+        newTheorems.forEach(t => {
+          console.log(t);
+          console.log(this.theorems);
+          const isNew = !this.theorems.find(x => x.toString() === t.toString());
+          if (isNew) this.theorems.push(t);
+        });
+        const newIds = newTheorems.map(t => t.toString());
+        this.nodes.update(newIds.map(id => ({ id, label: id })));
+
+        const label = "Rule " + (this.state.selected + 1);
+        this.selectedNodes.forEach(t =>
+          this.edges.update(
+            newTheorems.map(newT => {
+              const from = t.toString();
+              const to = newT.toString();
+              return { from, to, id: from + "->" + to, label };
+            })
+          )
+        );
+
+        this.network.selectNodes([]);
+        this.setState({ selected: -1 });
+        this.selectedNodes = [];
+      }
     }
+  };
+
+  handleSelectRule = selected => {
+    this.setState({ selected });
+    this.selectedNodes = [];
   };
 
   render() {
@@ -129,7 +181,7 @@ class App extends React.Component {
           selected={this.state.selected}
           rules={this.state.rules}
           system={this.state.system}
-          setSelect={selected => this.setState({ selected })}
+          setSelect={this.handleSelectRule}
           setSystem={system => this.changeSystem(system)}
         />
         <Theorems />
